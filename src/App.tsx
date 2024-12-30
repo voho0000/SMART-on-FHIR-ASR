@@ -25,7 +25,21 @@ interface Patient {
   birthDate?: string;
 }
 
-
+// Import Observation interface
+interface Observation {
+  code: {
+    coding?: { system?: string; code?: string; display?: string }[];
+    text?: string;
+  };
+  valueQuantity?: {
+    value?: number;
+    unit?: string;
+    system?: string;
+    code?: string;
+  };
+  valueString?: string;
+  effectiveDateTime?: string;
+}
 
 function calculateAge(birthDate: string): number {
   const birth = new Date(birthDate);
@@ -50,23 +64,39 @@ const App: React.FC = () => {
   const [recordingTime, setRecordingTime] = useState(0);
   const [gptResponse, setGptResponse] = useState(""); // Editable GPT Response
   const [isGenerating, setIsGenerating] = useState(false); // Spinner state for GPT generation
+  const [labData, setLabData] = useState<Observation[]>([]);
   const model = "gpt-4o"; // Fixed GPT model
 
   useEffect(() => {
     const fetchPatient = async () => {
       try {
         const client = await FHIR.oauth2.ready();
-        const bundle = await client.request("Patient");
-        if (bundle?.resourceType === "Bundle" && bundle?.entry?.length > 0) {
-          const patientEntry = bundle.entry.find(
+        const patientBundle = await client.request("Patient");
+        if (patientBundle?.resourceType === "Bundle" && patientBundle?.entry?.length > 0) {
+          const patientEntry = patientBundle.entry.find(
             (entry: any) => entry.resource.resourceType === "Patient"
           );
           if (patientEntry) {
             setPatient(patientEntry.resource as Patient);
+
+            // Fetch lab data for the patient
+            const patientId = patientEntry.resource.id;
+            const observations = await client.request(
+              `Observation?patient=${patientId}`
+            );
+            if (
+              observations?.resourceType === "Bundle" &&
+              observations?.entry?.length > 0
+            ) {
+              const labEntries = observations.entry
+                .map((entry: any) => entry.resource as Observation)
+                .filter((obs: Observation) => obs.code?.text); // Filter observations with valid text
+              setLabData(labEntries);
+            }
           }
         }
       } catch (error) {
-        console.error("Failed to fetch patient data:", error);
+        console.error("Failed to fetch patient data or lab data:", error);
       }
     };
     fetchPatient();
@@ -133,9 +163,8 @@ const App: React.FC = () => {
 
     // Combine Patient Info and ASR Content
     const patientInfo = patient
-      ? `Patient Info:\nName: ${patient.name?.[0]?.given?.join(" ") || "N/A"} ${
-          patient.name?.[0]?.family || "N/A"
-        }\nGender: ${patient.gender || "N/A"}\nBirth Date: ${patient.birthDate || "N/A"}\n`
+      ? `Patient Info:\nName: ${patient.name?.[0]?.given?.join(" ") || "N/A"} ${patient.name?.[0]?.family || "N/A"
+      }\nGender: ${patient.gender || "N/A"}\nBirth Date: ${patient.birthDate || "N/A"}\n`
       : "No patient information available.\n";
 
     const fullPrompt = `${patientInfo}\nASR Content:\n${asrText}\n\n${prompt}`;
@@ -185,15 +214,53 @@ const App: React.FC = () => {
                   <strong>Gender:</strong> {patient.gender || "N/A"}
                 </Text>
                 <Text>
-                <strong>Age:</strong> {patient.birthDate ? calculateAge(patient.birthDate) : "N/A"}
+                  <strong>Age:</strong> {patient.birthDate ? calculateAge(patient.birthDate) : "N/A"}
                 </Text>
               </VStack>
             ) : (
               <Text>Loading patient data...</Text>
             )}
           </Box>
-
-          {/* API Key Input Section */}
+          {/* Lab Data Section
+          <Box p={5} shadow="md" borderWidth="1px" borderRadius="lg">
+            <Heading as="h2" size="md" mb={4}>
+              Lab Data
+            </Heading>
+            {labData.length > 0 ? (
+              <VStack align="start">
+                {labData.map((obs, index) => (
+                  <Box key={index} p={2} borderWidth="1px" borderRadius="md">
+                    <Text>
+                      <strong>Test:</strong> {obs.code.text || "N/A"}
+                    </Text>
+                    {obs.valueQuantity ? (
+                      <Text>
+                        <strong>Value:</strong> {obs.valueQuantity.value}{" "}
+                        {obs.valueQuantity.unit}
+                      </Text>
+                    ) : obs.valueString ? (
+                      <Text>
+                        <strong>Value:</strong> {obs.valueString}
+                      </Text>
+                    ) : (
+                      <Text>
+                        <strong>Value:</strong> N/A
+                      </Text>
+                    )}
+                    <Text>
+                      <strong>Date:</strong>{" "}
+                      {obs.effectiveDateTime
+                        ? new Date(obs.effectiveDateTime).toLocaleString()
+                        : "N/A"}
+                    </Text>
+                  </Box>
+                ))}
+              </VStack>
+            ) : (
+              <Text>No lab data available.</Text>
+            )}
+          </Box> */}
+          {/* API Key Input Section
           <Box p={5} shadow="md" borderWidth="1px" borderRadius="lg">
             <Heading as="h2" size="md" mb={4}>
               API Key
@@ -204,7 +271,7 @@ const App: React.FC = () => {
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="Enter your OpenAI API key"
             />
-          </Box>
+          </Box> */}
 
           {/* ASR Section */}
           <Box p={5} shadow="md" borderWidth="1px" borderRadius="lg">
@@ -281,7 +348,7 @@ const App: React.FC = () => {
           {/* ChatGPT Section */}
           <Box p={5} shadow="md" borderWidth="1px" borderRadius="lg">
             <Heading as="h2" size="md" mb={4}>
-              ChatGPT
+              GPT Response
             </Heading>
             <Textarea
               value={gptResponse}
